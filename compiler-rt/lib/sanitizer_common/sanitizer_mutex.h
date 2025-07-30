@@ -18,8 +18,13 @@
 #include "sanitizer_libc.h"
 #include "sanitizer_thread_safety.h"
 
+#if SANITIZER_APPLE
+#  include "sanitizer_mutex_mac.h"
+#endif
+
 namespace __sanitizer {
 
+#if !SANITIZER_APPLE
 class SANITIZER_MUTEX StaticSpinMutex {
  public:
   void Init() {
@@ -49,6 +54,7 @@ class SANITIZER_MUTEX StaticSpinMutex {
 
   void LockSlow();
 };
+#endif
 
 class SANITIZER_MUTEX SpinMutex : public StaticSpinMutex {
  public:

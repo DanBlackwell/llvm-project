@@ -32,6 +32,10 @@
 #  include "sanitizer_common/sanitizer_posix.h"
 #  include "sanitizer_common/sanitizer_procmaps.h"
 
+#  if SANITIZER_APPLE
+#    include "sanitizer_common/sanitizer_mac.h"
+#  endif
+
 namespace __asan {
 
 void AsanOnDeadlySignal(int signo, void *siginfo, void *context) {
@@ -156,30 +160,51 @@ static void BeforeFork() {
   // `_lsan` functions defined regardless of `CAN_SANITIZE_LEAKS` and lock the
   // stuff we need.
   __lsan::LockThreads();
+#  if !SANITIZER_APPLE
   __lsan::LockAllocator();
+#  endif
 
   AcquirePoisonRecords();
 
   StackDepotLockBeforeFork();
+
+#  if SANITIZER_APPLE
+  forking_pid = internal_getpid();
+  in_fork = 1;
+#  endif
 }
 
 static void AfterFork(bool fork_child) {
+#  if SANITIZER_APPLE
+  // Leaving in_fork == 1 means every Unlock calls getpid unnecessarily
+  if (!fork_child)
+    in_fork = 0;
+#  endif
+
   StackDepotUnlockAfterFork(fork_child);
 
   ReleasePoisonRecords();
 
   // `_lsan` functions defined regardless of `CAN_SANITIZE_LEAKS` and unlock
   // the stuff we need.
+#  if !SANITIZER_APPLE
   __lsan::UnlockAllocator();
+#  endif
   __lsan::UnlockThreads();
   if (CAN_SANITIZE_LEAKS) {
     __lsan::UnlockGlobal();
   }
+
+#  if SANITIZER_APPLE
+  if (fork_child)
+    in_fork = 0;
+#  endif
+
   VReport(2, "AfterFork tid: %llu\n", GetTid());
 }
 
 void InstallAtForkHandler() {
-#  if SANITIZER_SOLARIS || SANITIZER_NETBSD || SANITIZER_APPLE || \
+#  if SANITIZER_SOLARIS || SANITIZER_NETBSD || \
       (SANITIZER_LINUX && SANITIZER_SPARC) || SANITIZER_HAIKU
   // While other Linux targets use clone in internal_fork which doesn't
   // trigger pthread_atfork handlers, Linux/sparc64 uses __fork, causing a

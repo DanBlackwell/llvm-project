@@ -29,6 +29,10 @@
 #include "tsan_symbolize.h"
 #include "ubsan/ubsan_init.h"
 
+#if SANITIZER_APPLE
+#  include "sanitizer_common/sanitizer_mac.h"
+#endif
+
 volatile int __tsan_resumed = 0;
 
 extern "C" void __tsan_resume() {
@@ -852,11 +856,20 @@ void ForkBefore(ThreadState* thr, uptr pc) SANITIZER_NO_THREAD_SAFETY_ANALYSIS {
 
 #  if SANITIZER_APPLE
   __tsan_test_only_on_fork();
+
+  forking_pid = internal_getpid();
+  in_fork = 1;
 #  endif
 }
 
 static void ForkAfter(ThreadState* thr,
                       bool child) SANITIZER_NO_THREAD_SAFETY_ANALYSIS {
+#  if SANITIZER_APPLE
+  if (!child)
+    // Leaving in_fork == 1 means every unlock calls getpid unnecessarily
+    in_fork = 0;
+#  endif
+
   thr->suppress_reports--;  // Enabled in ForkBefore.
   thr->ignore_interceptors--;
   thr->ignore_reads_and_writes--;
@@ -868,6 +881,10 @@ static void ForkAfter(ThreadState* thr,
   SlotAttachAndLock(thr);
   SlotUnlock(thr);
   GlobalProcessorUnlock();
+#  if SANITIZER_APPLE
+  if (child)
+    in_fork = 0;
+#  endif
   VReport(2, "AfterFork tid: %llu\n", GetTid());
 }
 

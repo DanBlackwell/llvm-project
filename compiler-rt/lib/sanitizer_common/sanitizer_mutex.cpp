@@ -16,6 +16,7 @@
 
 namespace __sanitizer {
 
+#if !SANITIZER_APPLE
 void StaticSpinMutex::LockSlow() {
   for (int i = 0;; i++) {
     if (i < 100)
@@ -27,6 +28,7 @@ void StaticSpinMutex::LockSlow() {
       return;
   }
 }
+#endif
 
 void Semaphore::Wait() {
   u32 count = atomic_load(&state_, memory_order_relaxed);
