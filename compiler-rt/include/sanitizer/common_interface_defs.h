@@ -157,7 +157,12 @@ int SANITIZER_CDECL __sanitizer_acquire_crash_state();
 /// \param old_mid Old middle of memory region.
 /// \param new_mid New middle of memory region.
 void SANITIZER_CDECL __sanitizer_annotate_contiguous_container(
-    const void *beg, const void *end, const void *old_mid, const void *new_mid);
+    const void *beg, const void *end, const void *old_mid, const void *new_mid)
+#ifdef __ASAN_DISABLE_CONTAINER_OVERFLOW__
+    {} // no-op implementation (disabling checks)
+#else
+    ; // function declaration, runtime implementation
+#endif
 
 /// Similar to <c>__sanitizer_annotate_contiguous_container</c>.
 ///
@@ -191,7 +196,12 @@ void SANITIZER_CDECL __sanitizer_annotate_contiguous_container(
 void SANITIZER_CDECL __sanitizer_annotate_double_ended_contiguous_container(
     const void *storage_beg, const void *storage_end,
     const void *old_container_beg, const void *old_container_end,
-    const void *new_container_beg, const void *new_container_end);
+    const void *new_container_beg, const void *new_container_end)
+#ifdef __ASAN_DISABLE_CONTAINER_OVERFLOW__
+    {} // no-op implementation (disabling checks)
+#else
+    ; // function declaration, runtime implementation
+#endif
 
 /// Copies memory annotations from a source storage region to a destination
 /// storage region. After the operation, the destination region has the same
@@ -226,9 +236,16 @@ void SANITIZER_CDECL __sanitizer_annotate_double_ended_contiguous_container(
 /// \param src_end End of the source container region.
 /// \param dst_begin Begin of the destination container region.
 /// \param dst_end End of the destination container region.
-void SANITIZER_CDECL __sanitizer_copy_contiguous_container_annotations(
-    const void *src_begin, const void *src_end, const void *dst_begin,
-    const void *dst_end);
+void SANITIZER_CDECL
+    __sanitizer_copy_contiguous_container_annotations(const void *src_begin,
+                                                      const void *src_end,
+                                                      const void *dst_begin,
+                                                      const void *dst_end)
+#ifdef __ASAN_DISABLE_CONTAINER_OVERFLOW__
+        {} // no-op implementation (disabling checks)
+#else
+    ; // function declaration, runtime implementation
+#endif
 
 /// Returns true if the contiguous container <c>[beg, end)</c> is properly
 /// poisoned.
@@ -246,9 +263,14 @@ void SANITIZER_CDECL __sanitizer_copy_contiguous_container_annotations(
 ///
 /// \returns True if the contiguous container <c>[beg, end)</c> is properly
 ///  poisoned.
-int SANITIZER_CDECL __sanitizer_verify_contiguous_container(const void *beg,
-                                                            const void *mid,
-                                                            const void *end);
+int SANITIZER_CDECL
+    __sanitizer_verify_contiguous_container(const void *beg, const void *mid,
+                                            const void *end)
+#ifdef __ASAN_DISABLE_CONTAINER_OVERFLOW__
+        {} // no-op implementation (disabling checks)
+#else
+    ; // function declaration, runtime implementation
+#endif
 
 /// Returns true if the double ended contiguous
 /// container <c>[storage_beg, storage_end)</c> is properly poisoned.
@@ -273,7 +295,12 @@ int SANITIZER_CDECL __sanitizer_verify_contiguous_container(const void *beg,
 /// [container_beg; container_end) is addressable.
 int SANITIZER_CDECL __sanitizer_verify_double_ended_contiguous_container(
     const void *storage_beg, const void *container_beg,
-    const void *container_end, const void *storage_end);
+    const void *container_end, const void *storage_end)
+#ifdef __ASAN_DISABLE_CONTAINER_OVERFLOW__
+    {} // no-op implementation (disabling checks)
+#else
+    ; // function declaration, runtime implementation
+#endif
 
 /// Similar to <c>__sanitizer_verify_contiguous_container()</c> but also
 /// returns the address of the first improperly poisoned byte.
@@ -285,8 +312,10 @@ int SANITIZER_CDECL __sanitizer_verify_double_ended_contiguous_container(
 /// \param end Old end of memory region.
 ///
 /// \returns The bad address or NULL.
-const void *SANITIZER_CDECL __sanitizer_contiguous_container_find_bad_address(
-    const void *beg, const void *mid, const void *end);
+const void *SANITIZER_CDECL
+    __sanitizer_contiguous_container_find_bad_address(const void *beg,
+                                                      const void *mid,
+                                                      const void *end);
 
 /// returns the address of the first improperly poisoned byte.
 ///
