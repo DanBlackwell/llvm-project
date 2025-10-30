@@ -854,10 +854,15 @@ class LoadedModule {
   const char *full_name() const { return full_name_; }
   uptr base_address() const { return base_address_; }
   uptr max_address() const { return max_address_; }
+  void set_max_address(uptr max_address) { max_address_ = max_address; }
+  void set_base_address(uptr base_address) { base_address_ = base_address; }
   ModuleArch arch() const { return arch_; }
   const u8 *uuid() const { return uuid_; }
   uptr uuid_size() const { return uuid_size_; }
   bool instrumented() const { return instrumented_; }
+
+  // Clear all address ranges
+  void clearRanges();
 
   struct AddressRange {
     AddressRange *next;

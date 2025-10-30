@@ -202,6 +202,14 @@ void LoadedModule::addAddressRange(uptr beg, uptr end, bool executable,
   max_address_ = Max(max_address_, end);
 }
 
+void LoadedModule::clearRanges() {
+  while (!ranges_.empty()) {
+    AddressRange *r = ranges_.front();
+    ranges_.pop_front();
+    InternalFree(r);
+  }
+}
+
 bool LoadedModule::containsAddress(uptr address) const {
   for (const AddressRange &r : ranges()) {
     if (r.beg <= address && address < r.end)

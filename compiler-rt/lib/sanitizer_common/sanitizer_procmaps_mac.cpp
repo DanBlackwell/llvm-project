@@ -11,6 +11,7 @@
 
 #include "sanitizer_platform.h"
 #if SANITIZER_APPLE
+#include "sanitizer_allocator_internal.h"
 #include "sanitizer_common.h"
 #include "sanitizer_placement_new.h"
 #include "sanitizer_procmaps.h"
@@ -445,6 +446,43 @@ bool MemoryMappingLayout::Next(MemoryMappedSegment *segment) {
   return false;
 }
 
+static void FixSharedCacheLibraryRanges(LoadedModule *module) {
+  const char *module_name = module->full_name();
+
+  uuid_t uuid;
+  if (!_dyld_get_shared_cache_uuid(uuid))
+    return;
+
+  size_t cache_len;
+  uptr cache_start = (uptr)_dyld_get_shared_cache_range(&cache_len);
+  if (!cache_start)
+    return;
+
+  __block bool found = false;
+  __block uptr text_start = 0;
+  __block uptr text_end = 0;
+
+  dyld_shared_cache_iterate_text(
+      uuid, ^(const dyld_shared_cache_dylib_text_info *info) {
+        if (info->version < 2 || found)
+          return;
+        if (internal_strcmp(info->path, module_name) != 0)
+          return;
+
+        text_start = cache_start + info->textSegmentOffset;
+        text_end = text_start + info->textSegmentSize;
+        found = true;
+      });
+
+  if (found) {
+    module->set_base_address(text_start);
+    module->set_max_address(text_end);
+    module->clearRanges();
+    module->addAddressRange(text_start, text_end, /*executable=*/true,
+                           /*writable=*/false, "__TEXT");
+  }
+}
+
 void MemoryMappingLayout::DumpListOfModules(
     InternalMmapVectorNoCtor<LoadedModule> *modules) {
   Reset();
@@ -452,6 +490,7 @@ void MemoryMappingLayout::DumpListOfModules(
   MemoryMappedSegment segment(module_name.data(), module_name.size());
   MemoryMappedSegmentData data;
   segment.data_ = &data;
+  LoadedModule *prev_module = nullptr;
   while (Next(&segment)) {
     // skip the __PAGEZERO segment, its vmsize is 0
     if (segment.filename[0] == '\0' || (segment.start == segment.end))
@@ -461,13 +500,22 @@ void MemoryMappingLayout::DumpListOfModules(
         0 == internal_strcmp(segment.filename, modules->back().full_name())) {
       cur_module = &modules->back();
     } else {
+      // Starting a new module. Fix the previous module's ranges if it was
+      // a shared cache library.
+      if (prev_module)
+        FixSharedCacheLibraryRanges(prev_module);
+
       modules->push_back(LoadedModule());
       cur_module = &modules->back();
       cur_module->set(segment.filename, segment.start, segment.arch,
                       segment.uuid, data_.current_instrumented);
+      prev_module = cur_module;
     }
     segment.AddAddressRanges(cur_module);
   }
+  // Fix the last module
+  if (prev_module)
+    FixSharedCacheLibraryRanges(prev_module);
 }
 
 }  // namespace __sanitizer
