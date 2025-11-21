@@ -115,6 +115,7 @@ add_clang_library(clangCodeGen
   ModuleBuilder.cpp
   ObjectFilePCHContainerWriter.cpp
   PatternInit.cpp
+  SanitizerHWCompatCheck.cpp
   SanitizerMetadata.cpp
   SwiftCallingConv.cpp
   TargetBuiltins/ARM.cpp

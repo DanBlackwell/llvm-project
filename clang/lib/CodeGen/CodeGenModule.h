@@ -16,6 +16,7 @@
 #include "CGVTables.h"
 #include "CodeGenTypeCache.h"
 #include "CodeGenTypes.h"
+#include "SanitizerHWCompatCheck.h"
 #include "SanitizerMetadata.h"
 #include "TrapReasonBuilder.h"
 #include "clang/AST/DeclCXX.h"
@@ -655,6 +656,7 @@ private:
   llvm::Function *FakeUseFn = nullptr;
 
   std::unique_ptr<SanitizerMetadata> SanitizerMD;
+  std::unique_ptr<SanitizerHWCompatCheck> SanitizerHWCheck;
 
   llvm::MapVector<const Decl *, bool> DeferredEmptyCoverageMappingDecls;
 
@@ -1539,6 +1541,10 @@ public:
 
   SanitizerMetadata *getSanitizerMetadata() {
     return SanitizerMD.get();
+  }
+
+  SanitizerHWCompatCheck *getSanitizerHWCompatCheck() {
+    return SanitizerHWCheck.get();
   }
 
   void addDeferredVTable(const CXXRecordDecl *RD) {

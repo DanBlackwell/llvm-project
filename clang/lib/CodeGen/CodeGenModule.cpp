@@ -407,6 +407,7 @@ CodeGenModule::CodeGenModule(ASTContext &C,
       Target(C.getTargetInfo()), ABI(createCXXABI(*this)),
       VMContext(M.getContext()), VTables(*this), StackHandler(diags),
       SanitizerMD(new SanitizerMetadata(*this)),
+      SanitizerHWCheck(new SanitizerHWCompatCheck(*this)),
       AtomicOpts(Target.getAtomicOpts()) {
 
   // Initialize the type cache.
@@ -961,6 +962,9 @@ void CodeGenModule::Release() {
   Module *Primary = getContext().getCurrentNamedModule();
   if (CXX20ModuleInits && Primary && !Primary->isHeaderLikeModule())
     EmitModuleInitializers(Primary);
+  if (SanitizerHWCheck && LangOpts.Sanitize.has(SanitizerKind::MemtagStack))
+    // Note: Depends on emitMultiVersionFunctions() running after
+    SanitizerHWCheck->emitRuntimeCheck();
   EmitDeferred();
   DeferredDecls.insert_range(EmittedDeferredDecls);
   EmittedDeferredDecls.clear();
