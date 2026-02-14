@@ -49,8 +49,6 @@ namespace __sanitizer {
 
 [[maybe_unused]] static atomic_uint8_t signal_handler_is_from_sanitizer[64];
 
-static THREADLOCAL void* allocated_alt_stack_base = nullptr;
-
 u32 GetUid() {
   return getuid();
 }
@@ -190,7 +188,7 @@ static uptr GetAltStackSize() {
   return SIGSTKSZ * 4;
 }
 
-void SetAlternateSignalStack() {
+void SetAlternateSignalStack(void **alt_stack_base_out) {
   stack_t altstack, oldstack;
   CHECK_EQ(0, sigaltstack(nullptr, &oldstack));
   // If the alternate stack is already in place, do nothing.
@@ -203,19 +201,22 @@ void SetAlternateSignalStack() {
   altstack.ss_sp = (char *)MmapOrDie(altstack.ss_size, __func__);
   altstack.ss_flags = 0;
   CHECK_EQ(0, sigaltstack(&altstack, nullptr));
-  allocated_alt_stack_base = altstack.ss_sp;
+
+  // Store the pointer where the caller can retrieve it later
+  if (alt_stack_base_out)
+    *alt_stack_base_out = altstack.ss_sp;
 }
 
-void UnsetAlternateSignalStack() {
+void UnsetAlternateSignalStack(void *alt_stack_base) {
   stack_t altstack, oldstack;
   altstack.ss_sp = nullptr;
   altstack.ss_flags = SS_DISABLE;
   altstack.ss_size = GetAltStackSize();  // Some sane value required on Darwin.
   CHECK_EQ(0, sigaltstack(&altstack, &oldstack));
-  if (allocated_alt_stack_base != 0 &&
-      allocated_alt_stack_base == oldstack.ss_sp) {
+
+  // Only unmap if we have the base pointer and it matches what was installed
+  if (alt_stack_base != nullptr && alt_stack_base == oldstack.ss_sp) {
     UnmapOrDie(oldstack.ss_sp, oldstack.ss_size);
-    allocated_alt_stack_base = nullptr;
   }
 }
 

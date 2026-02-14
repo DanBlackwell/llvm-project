@@ -93,8 +93,8 @@ void CheckMPROTECT() {}
 void PlatformPrepareForSandboxing(void *args) {}
 void DisableCoreDumperIfNecessary() {}
 void InstallDeadlySignalHandlers(SignalHandlerType handler) {}
-void SetAlternateSignalStack() {}
-void UnsetAlternateSignalStack() {}
+void SetAlternateSignalStack(void **alt_stack_base_out) {}
+void UnsetAlternateSignalStack(void *alt_stack_base) {}
 
 bool SignalContext::IsStackOverflow() const { return false; }
 void SignalContext::DumpAllRegisters(void *context) { UNIMPLEMENTED(); }
