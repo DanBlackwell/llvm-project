@@ -851,16 +851,12 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   if (SanOpts.hasOneOf(SanitizerKind::Fuzzer | SanitizerKind::FuzzerNoLink))
     Fn->addFnAttr(llvm::Attribute::OptForFuzzing);
 
-  // Ignore TSan memory acesses from within ObjC/ObjC++ dealloc, initialize,
-  // .cxx_destruct, __destroy_helper_block_ and all of their calees at run time.
+  // Ignore TSan memory accesses from within ObjC +initialize at run time. The
+  // runtime orders it with an uninstrumented lock that TSan can't see.
   if (SanOpts.has(SanitizerKind::Thread)) {
     if (const auto *OMD = dyn_cast_or_null<ObjCMethodDecl>(D)) {
-      const IdentifierInfo *II = OMD->getSelector().getIdentifierInfoForSlot(0);
-      if (OMD->getMethodFamily() == OMF_dealloc ||
-          OMD->getMethodFamily() == OMF_initialize ||
-          (OMD->getSelector().isUnarySelector() && II->isStr(".cxx_destruct"))) {
+      if (OMD->getMethodFamily() == OMF_initialize)
         markAsIgnoreThreadCheckingAtRuntime(Fn);
-      }
     }
   }
 

@@ -77,6 +77,12 @@ TSAN_FLAG(bool, ignore_noninstrumented_modules, SANITIZER_APPLE ? true : false,
           "modules.")
 TSAN_FLAG(bool, shared_ptr_interceptor, true,
           "Track atomic reference counting in libc++ shared_ptr and weak_ptr.")
+TSAN_FLAG(bool, track_objc_deinit_races, true,
+          "Darwin only: method-swizzle NSObject -release/-dealloc to detect "
+          "races between an object's destructor (-dealloc / Swift deinit) and a "
+          "concurrent use of the instance. Forces every class off the inline "
+          "refcount fast path, so it adds overhead on top of the usual TSan "
+          "slowdown.")
 TSAN_FLAG(bool, print_full_thread_history, false,
           "If set, prints thread creation stacks for the threads involved in "
           "the report and their ancestors up to the main thread.")

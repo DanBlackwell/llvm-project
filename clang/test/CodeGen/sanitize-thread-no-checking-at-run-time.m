@@ -29,8 +29,6 @@ public:
 @end
 
 // TSAN: initialize{{.*}}) [[ATTR:#[0-9]+]]
-// TSAN: dealloc{{.*}}) [[ATTR:#[0-9]+]]
-// TSAN: cxx_destruct{{.*}}) [[ATTR:#[0-9]+]]
 
 void test2(id x) {
   extern void test2_helper(id (^)(void));

@@ -20,7 +20,12 @@
 
 using namespace __tsan;
 
-void __tsan_init() { Initialize(cur_thread_init()); }
+void __tsan_init() {
+  Initialize(cur_thread_init());
+#if SANITIZER_APPLE
+  InstallObjCDeinitRaceTracking();
+#endif
+}
 
 void __tsan_flush_memory() {
   FlushShadowMemory();

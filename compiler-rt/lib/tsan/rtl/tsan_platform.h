@@ -1128,6 +1128,9 @@ inline uptr RestoreAddr(uptr addr) {
 
 void InitializePlatform();
 void InitializePlatformEarly();
+#if SANITIZER_APPLE
+void InstallObjCDeinitRaceTracking();
+#endif
 bool CheckAndProtect(bool protect, bool ignore_heap, bool print_warnings);
 void InitializeShadowMemoryPlatform();
 void WriteMemoryProfile(char *buf, uptr buf_size, u64 uptime_ns);
