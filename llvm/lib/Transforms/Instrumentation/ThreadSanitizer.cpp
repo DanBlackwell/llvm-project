@@ -460,7 +460,14 @@ static bool isObjCARCAccessCall(const CallBase *CB) {
   if (!Callee)
     return false;
   switch (Callee->getIntrinsicID()) {
+  case Intrinsic::objc_loadWeak:
+  case Intrinsic::objc_loadWeakRetained:
   case Intrinsic::objc_storeStrong:
+  case Intrinsic::objc_storeWeak:
+  case Intrinsic::objc_initWeak:
+  case Intrinsic::objc_destroyWeak:
+  case Intrinsic::objc_copyWeak:
+  case Intrinsic::objc_moveWeak:
     return true;
   case Intrinsic::not_intrinsic:
     break;
@@ -470,7 +477,9 @@ static bool isObjCARCAccessCall(const CallBase *CB) {
   StringRef Name = Callee->getName();
   if (!Name.consume_front("objc_"))
     return false;
-  return Name == "storeStrong";
+  return Name == "loadWeak" || Name == "loadWeakRetained" ||
+         Name == "storeStrong" || Name == "storeWeak" || Name == "initWeak" ||
+         Name == "destroyWeak" || Name == "copyWeak" || Name == "moveWeak";
 }
 
 void ThreadSanitizer::InsertRuntimeIgnores(Function &F) {
@@ -746,10 +755,39 @@ bool ThreadSanitizer::instrumentObjCARC(CallBase *CB, const DataLayout &DL) {
   StringRef Name = Callee->getName();
   InstrumentationIRBuilder IRB(CB);
 
-  if (IID == Intrinsic::objc_storeStrong || Name == "objc_storeStrong") {
+  if (IID == Intrinsic::objc_loadWeak ||
+      IID == Intrinsic::objc_loadWeakRetained || Name == "objc_loadWeak" ||
+      Name == "objc_loadWeakRetained") {
+    if (CB->arg_size() < 1)
+      return false;
+    return emitObjCARCAccess(IRB, CB->getArgOperand(0), /*IsWrite=*/false, DL);
+  }
+
+  if (IID == Intrinsic::objc_storeStrong || IID == Intrinsic::objc_storeWeak ||
+      IID == Intrinsic::objc_initWeak || IID == Intrinsic::objc_destroyWeak ||
+      Name == "objc_storeStrong" || Name == "objc_storeWeak" ||
+      Name == "objc_initWeak" || Name == "objc_destroyWeak") {
     if (CB->arg_size() < 1)
       return false;
     return emitObjCARCAccess(IRB, CB->getArgOperand(0), /*IsWrite=*/true, DL);
+  }
+
+  if (IID == Intrinsic::objc_copyWeak || Name == "objc_copyWeak") {
+    if (CB->arg_size() < 2)
+      return false;
+    bool Res =
+        emitObjCARCAccess(IRB, CB->getArgOperand(1), /*IsWrite=*/false, DL);
+    Res |= emitObjCARCAccess(IRB, CB->getArgOperand(0), /*IsWrite=*/true, DL);
+    return Res;
+  }
+
+  if (IID == Intrinsic::objc_moveWeak || Name == "objc_moveWeak") {
+    if (CB->arg_size() < 2)
+      return false;
+    bool Res =
+        emitObjCARCAccess(IRB, CB->getArgOperand(1), /*IsWrite=*/true, DL);
+    Res |= emitObjCARCAccess(IRB, CB->getArgOperand(0), /*IsWrite=*/true, DL);
+    return Res;
   }
 
   return false;
