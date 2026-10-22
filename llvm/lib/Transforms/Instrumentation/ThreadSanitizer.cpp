@@ -104,6 +104,9 @@ private:
   bool instrumentLoadOrStore(const InstructionInfo &II, const DataLayout &DL);
   bool instrumentAtomic(Instruction *I, const DataLayout &DL);
   bool instrumentMemIntrinsic(Instruction *I);
+  bool instrumentObjCARC(CallBase *CB, const DataLayout &DL);
+  bool emitObjCARCAccess(InstrumentationIRBuilder &IRB, Value *Addr,
+                         bool IsWrite, const DataLayout &DL);
   void chooseInstructionsToInstrument(SmallVectorImpl<Instruction *> &Local,
                                       SmallVectorImpl<InstructionInfo> &All,
                                       const DataLayout &DL);
@@ -452,6 +455,24 @@ static bool isTsanAtomic(const Instruction *I) {
   return true;
 }
 
+static bool isObjCARCAccessCall(const CallBase *CB) {
+  const Function *Callee = CB->getCalledFunction();
+  if (!Callee)
+    return false;
+  switch (Callee->getIntrinsicID()) {
+  case Intrinsic::objc_storeStrong:
+    return true;
+  case Intrinsic::not_intrinsic:
+    break;
+  default:
+    return false;
+  }
+  StringRef Name = Callee->getName();
+  if (!Name.consume_front("objc_"))
+    return false;
+  return Name == "storeStrong";
+}
+
 void ThreadSanitizer::InsertRuntimeIgnores(Function &F) {
   InstrumentationIRBuilder IRB(F.getEntryBlock().getFirstNonPHIIt());
   IRB.CreateCall(TsanIgnoreBegin);
@@ -485,9 +506,11 @@ bool ThreadSanitizer::sanitizeFunction(Function &F,
   SmallVector<Instruction*, 8> LocalLoadsAndStores;
   SmallVector<Instruction*, 8> AtomicAccesses;
   SmallVector<Instruction*, 8> MemIntrinCalls;
+  SmallVector<CallBase *, 8> ObjCARCCalls;
   bool Res = false;
   bool HasCalls = false;
   bool SanitizeFunction = F.hasFnAttribute(Attribute::SanitizeThread);
+  bool IsObjC = F.getParent()->getModuleFlag("Objective-C Version") != nullptr;
   const DataLayout &DL = F.getDataLayout();
 
   // Traverse all instructions, collect loads/stores/returns, check for calls.
@@ -500,11 +523,13 @@ bool ThreadSanitizer::sanitizeFunction(Function &F,
         AtomicAccesses.push_back(&Inst);
       else if (isa<LoadInst>(Inst) || isa<StoreInst>(Inst))
         LocalLoadsAndStores.push_back(&Inst);
-      else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
-        if (CallInst *CI = dyn_cast<CallInst>(&Inst))
+      else if (CallBase *CB = dyn_cast<CallBase>(&Inst)) {
+        if (CallInst *CI = dyn_cast<CallInst>(CB))
           maybeMarkSanitizerLibraryCallNoBuiltin(CI, &TLI);
-        if (isa<MemIntrinsic>(Inst))
-          MemIntrinCalls.push_back(&Inst);
+        if (isa<MemIntrinsic>(CB))
+          MemIntrinCalls.push_back(CB);
+        else if (IsObjC && isObjCARCAccessCall(CB))
+          ObjCARCCalls.push_back(CB);
         HasCalls = true;
         chooseInstructionsToInstrument(LocalLoadsAndStores, AllLoadsAndStores,
                                        DL);
@@ -518,10 +543,14 @@ bool ThreadSanitizer::sanitizeFunction(Function &F,
   // (e.g. variables that do not escape, etc).
 
   // Instrument memory accesses only if we want to report bugs in the function.
-  if (Opts.tsan_instrument_memory_accesses && SanitizeFunction)
+  if (Opts.tsan_instrument_memory_accesses && SanitizeFunction) {
     for (const auto &II : AllLoadsAndStores) {
       Res |= instrumentLoadOrStore(II, DL);
     }
+    for (auto *CB : ObjCARCCalls) {
+      Res |= instrumentObjCARC(CB, DL);
+    }
+  }
 
   // Instrument atomic memory accesses in any case (they can be used to
   // implement synchronization).
@@ -678,6 +707,51 @@ bool ThreadSanitizer::instrumentMemIntrinsic(Instruction *I) {
          IRB.CreateIntCast(M->getArgOperand(2), IntptrTy, false)});
     I->eraseFromParent();
   }
+  return false;
+}
+
+bool ThreadSanitizer::emitObjCARCAccess(InstrumentationIRBuilder &IRB,
+                                        Value *Addr, bool IsWrite,
+                                        const DataLayout &DL) {
+  if (!Addr->getType()->isPointerTy())
+    return false;
+  if (!shouldInstrumentReadWriteFromAddress(
+          IRB.GetInsertBlock()->getModule(), Addr))
+    return false;
+  if (!IsWrite && addrPointsToConstantData(Addr))
+    return false;
+  const AllocaInst *AI = findAllocaForValue(Addr);
+  if (AI && !PointerMayBeCaptured(AI, /*ReturnCaptures=*/true) &&
+      Opts.tsan_omit_by_pointer_capturing) {
+    NumOmittedNonCaptured++;
+    return false;
+  }
+  int Idx = getMemoryAccessFuncIndex(Addr->getType(), Addr, DL);
+  if (Idx < 0)
+    return false;
+  IRB.CreateCall(IsWrite ? TsanWrite[Idx] : TsanRead[Idx], Addr);
+  if (IsWrite)
+    NumInstrumentedWrites++;
+  else
+    NumInstrumentedReads++;
+  return true;
+}
+
+bool ThreadSanitizer::instrumentObjCARC(CallBase *CB, const DataLayout &DL) {
+  Function *Callee = CB->getCalledFunction();
+  if (!Callee)
+    return false;
+
+  Intrinsic::ID IID = Callee->getIntrinsicID();
+  StringRef Name = Callee->getName();
+  InstrumentationIRBuilder IRB(CB);
+
+  if (IID == Intrinsic::objc_storeStrong || Name == "objc_storeStrong") {
+    if (CB->arg_size() < 1)
+      return false;
+    return emitObjCARCAccess(IRB, CB->getArgOperand(0), /*IsWrite=*/true, DL);
+  }
+
   return false;
 }
 
