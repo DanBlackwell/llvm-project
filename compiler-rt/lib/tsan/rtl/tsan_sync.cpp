@@ -18,7 +18,7 @@ namespace __tsan {
 
 void DDMutexInit(ThreadState *thr, uptr pc, SyncVar *s);
 
-SyncVar::SyncVar() : mtx(MutexTypeSyncVar) { Reset(); }
+SyncVar::SyncVar() : mtx(MutexTypeSyncVar), dd() { Reset(); }
 
 void SyncVar::Init(ThreadState *thr, uptr pc, uptr addr, bool save_stack) {
   Reset();
@@ -39,6 +39,8 @@ void SyncVar::Reset() {
   atomic_store_relaxed(&flags, 0);
   Free(clock);
   Free(read_clock);
+  if (ctx && ctx->dd && common_flags()->detect_deadlocks)
+    ctx->dd->MutexDestroy(nullptr, &dd);
 }
 
 MetaMap::MetaMap()
