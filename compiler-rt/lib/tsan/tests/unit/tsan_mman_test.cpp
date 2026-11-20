@@ -11,8 +11,10 @@
 //===----------------------------------------------------------------------===//
 #include <limits>
 #include <sanitizer/allocator_interface.h>
+#include "tsan_interceptors.h"
 #include "tsan_mman.h"
 #include "tsan_rtl.h"
+#include "tsan_symbolize.h"
 #include "gtest/gtest.h"
 
 namespace __tsan {
@@ -191,6 +193,50 @@ TEST(Mman, AlignedAlloc) {
   void *p = user_aligned_alloc(thr, 0, 8, 64);
   EXPECT_NE(p, (void*)0);
   user_free(thr, 0, p);
+}
+
+TEST(Mman, SymbolizerAlloc) {
+  ThreadState *thr = cur_thread();
+  uptr pc = 0;
+
+  char *user_p1 = (char *)user_alloc(thr, pc, 64);
+  char *user_p2 = (char *)user_alloc(thr, pc, 256 * 1024);
+  char *user_p3 = (char *)user_alloc(thr, pc, 64);
+  internal_memset(user_p3, 0xab, 64);
+
+  EnterSymbolizer();
+  EXPECT_TRUE(in_symbolizer());
+
+  // Free and realloc user blocks while in_symbolizer() is true.
+  user_free(thr, pc, user_p1);
+  user_free(thr, pc, user_p2);
+  user_p3 = (char *)user_realloc(thr, pc, user_p3, 256);
+  ASSERT_NE(user_p3, nullptr);
+  for (int i = 0; i < 64; i++)
+    EXPECT_EQ(user_p3[i], (char)0xab);
+
+  // Allocate blocks while in_symbolizer() is true.
+  char *sym_p1 = (char *)user_alloc(thr, pc, 64);
+  char *sym_p2 = (char *)user_alloc(thr, pc, 256 * 1024);
+  char *sym_p3 = (char *)user_alloc(thr, pc, 64);
+  internal_memset(sym_p3, 0xcd, 64);
+  EXPECT_EQ(nullptr,
+            user_alloc(thr, pc, std::numeric_limits<uptr>::max()));
+
+  ExitSymbolizer();
+  EXPECT_FALSE(in_symbolizer());
+
+  // Size, realloc, and free symbolizer-allocated blocks in user mode.
+  EXPECT_EQ(64U, user_alloc_usable_size(sym_p1));
+  EXPECT_EQ(256U * 1024, user_alloc_usable_size(sym_p2));
+  sym_p3 = (char *)user_realloc(thr, pc, sym_p3, 512);
+  ASSERT_NE(sym_p3, nullptr);
+  for (int i = 0; i < 64; i++)
+    EXPECT_EQ(sym_p3[i], (char)0xcd);
+  user_free(thr, pc, sym_p1);
+  user_free(thr, pc, sym_p2);
+  user_free(thr, pc, sym_p3);
+  user_free(thr, pc, user_p3);
 }
 
 }  // namespace __tsan

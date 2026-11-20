@@ -29,33 +29,31 @@ DECLARE_REAL(void *, malloc, uptr size)
 DECLARE_REAL(void, free, void *ptr)
 
 // TODO(alekseys): throw std::bad_alloc instead of dying on OOM.
-#define OPERATOR_NEW_BODY(mangled_name, nothrow) \
-  if (in_symbolizer()) \
-    return InternalAlloc(size); \
-  void *p = 0; \
-  {  \
-    SCOPED_INTERCEPTOR_RAW(mangled_name, size); \
-    p = user_alloc(thr, pc, size); \
-    if (!nothrow && UNLIKELY(!p)) { \
-      GET_STACK_TRACE_FATAL(thr, pc); \
-      ReportOutOfMemory(size, &stack); \
-    } \
-  }  \
-  invoke_malloc_hook(p, size);  \
+#define OPERATOR_NEW_BODY(mangled_name, nothrow)            \
+  void *p = 0;                                              \
+  {                                                         \
+    SCOPED_INTERCEPTOR_RAW(mangled_name, size);             \
+    p = user_alloc(thr, pc, size);                          \
+    if (!nothrow && UNLIKELY(!p && !thr->in_symbolizer)) {  \
+      GET_STACK_TRACE_FATAL(thr, pc);                       \
+      ReportOutOfMemory(size, &stack);                      \
+    }                                                       \
+  }                                                         \
+  invoke_malloc_hook(p, size);                              \
   return p;
 
 #define OPERATOR_NEW_BODY_ALIGN(mangled_name, nothrow)       \
-  if (in_symbolizer())                                       \
-    return InternalAlloc(size, nullptr, (uptr)align);        \
   void* p = 0;                                               \
   {                                                          \
     SCOPED_INTERCEPTOR_RAW(mangled_name, size);              \
     if (UNLIKELY(!CheckAlignedNewAlignment((uptr)align))) {  \
+      if (thr->in_symbolizer)                                \
+        return nullptr;                                      \
       GET_STACK_TRACE_FATAL(thr, pc);                        \
       ReportInvalidAllocationAlignment((uptr)align, &stack); \
     }                                                        \
     p = user_memalign(thr, pc, (uptr)align, size);           \
-    if (!nothrow && UNLIKELY(!p)) {                          \
+    if (!nothrow && UNLIKELY(!p && !thr->in_symbolizer)) {   \
       GET_STACK_TRACE_FATAL(thr, pc);                        \
       ReportOutOfMemory(size, &stack);                       \
     }                                                        \
@@ -119,8 +117,6 @@ void *operator new[](__sanitizer::uptr size, std::align_val_t align,
 
 #define OPERATOR_DELETE_BODY(mangled_name) \
   if (ptr == 0) return;  \
-  if (in_symbolizer()) \
-    return InternalFree(ptr); \
   invoke_free_hook(ptr);  \
   SCOPED_INTERCEPTOR_RAW(mangled_name, ptr);  \
   user_free(thr, pc, ptr);

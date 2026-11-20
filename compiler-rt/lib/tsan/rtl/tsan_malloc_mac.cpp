@@ -29,7 +29,6 @@ using namespace __tsan;
   void *p =                                     \
       user_memalign(cur_thread(), StackTrace::GetCurrentPc(), alignment, size)
 #define COMMON_MALLOC_MALLOC(size)                             \
-  if (in_symbolizer()) return InternalAlloc(size);             \
   void *p = 0;                                                 \
   {                                                            \
     SCOPED_INTERCEPTOR_RAW(malloc, size);                      \
@@ -37,7 +36,6 @@ using namespace __tsan;
   }                                                            \
   invoke_malloc_hook(p, size)
 #define COMMON_MALLOC_REALLOC(ptr, size)                              \
-  if (in_symbolizer()) return InternalRealloc(ptr, size);             \
   if (ptr)                                                            \
     invoke_free_hook(ptr);                                            \
   void *p = 0;                                                        \
@@ -47,7 +45,6 @@ using namespace __tsan;
   }                                                                   \
   invoke_malloc_hook(p, size)
 #define COMMON_MALLOC_CALLOC(count, size)                              \
-  if (in_symbolizer()) return InternalCalloc(count, size);             \
   void *p = 0;                                                         \
   {                                                                    \
     SCOPED_INTERCEPTOR_RAW(calloc, size, count);                       \
@@ -55,21 +52,13 @@ using namespace __tsan;
   }                                                                    \
   invoke_malloc_hook(p, size * count)
 #define COMMON_MALLOC_POSIX_MEMALIGN(memptr, alignment, size)      \
-  if (in_symbolizer()) {                                           \
-    void *p = InternalAlloc(size, nullptr, alignment);             \
-    if (!p) return errno_ENOMEM;                                   \
-    *memptr = p;                                                   \
-    return 0;                                                      \
-  }                                                                \
   SCOPED_INTERCEPTOR_RAW(posix_memalign, memptr, alignment, size); \
   int res = user_posix_memalign(thr, pc, memptr, alignment, size);
 #define COMMON_MALLOC_VALLOC(size)                            \
-  if (in_symbolizer())                                        \
-    return InternalAlloc(size, nullptr, GetPageSizeCached()); \
   SCOPED_INTERCEPTOR_RAW(valloc, size);                       \
   void *p = user_valloc(thr, pc, size)
 #define COMMON_MALLOC_FREE(ptr)                              \
-  if (in_symbolizer()) return InternalFree(ptr);             \
+  if (UNLIKELY(!ptr)) return;                                \
   invoke_free_hook(ptr);                                     \
   SCOPED_INTERCEPTOR_RAW(free, ptr);                         \
   user_free(thr, pc, ptr)

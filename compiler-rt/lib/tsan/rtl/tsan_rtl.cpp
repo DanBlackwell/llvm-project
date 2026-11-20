@@ -929,7 +929,7 @@ void GrowShadowStack(ThreadState *thr) {
 
 StackID CurrentStackId(ThreadState *thr, uptr pc) {
 #if !SANITIZER_GO
-  if (!thr->is_inited)  // May happen during bootstrap.
+  if (!thr->is_inited || thr->in_symbolizer)  // May happen during bootstrap.
     return kInvalidStackID;
 #endif
   if (pc != 0) {

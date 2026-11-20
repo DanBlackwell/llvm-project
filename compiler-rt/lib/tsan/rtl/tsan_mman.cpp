@@ -190,16 +190,17 @@ static void SignalUnsafeCall(ThreadState *thr, uptr pc) {
 
 void *user_alloc_internal(ThreadState *thr, uptr pc, uptr sz, uptr align,
                           bool signal) {
+  ScopedGlobalProcessor sgp;
   if (sz >= kMaxAllowedMallocSize || align >= kMaxAllowedMallocSize ||
       sz > max_user_defined_malloc_size) {
-    if (AllocatorMayReturnNull())
+    if (AllocatorMayReturnNull() || thr->in_symbolizer)
       return nullptr;
     uptr malloc_limit =
         Min(kMaxAllowedMallocSize, max_user_defined_malloc_size);
     GET_STACK_TRACE_FATAL(thr, pc);
     ReportAllocationSizeTooBig(sz, malloc_limit, &stack);
   }
-  if (UNLIKELY(IsRssLimitExceeded())) {
+  if (UNLIKELY(!thr->in_symbolizer && IsRssLimitExceeded())) {
     if (AllocatorMayReturnNull())
       return nullptr;
     GET_STACK_TRACE_FATAL(thr, pc);
@@ -208,14 +209,14 @@ void *user_alloc_internal(ThreadState *thr, uptr pc, uptr sz, uptr align,
   void *p = allocator()->Allocate(&thr->proc()->alloc_cache, sz, align);
   if (UNLIKELY(!p)) {
     SetAllocatorOutOfMemory();
-    if (AllocatorMayReturnNull())
+    if (AllocatorMayReturnNull() || thr->in_symbolizer)
       return nullptr;
     GET_STACK_TRACE_FATAL(thr, pc);
     ReportOutOfMemory(sz, &stack);
   }
   if (ctx && ctx->initialized)
-    OnUserAlloc(thr, pc, (uptr)p, sz, true);
-  if (signal)
+    OnUserAlloc(thr, pc, (uptr)p, sz, !thr->in_symbolizer);
+  if (signal && !thr->in_symbolizer)
     SignalUnsafeCall(thr, pc);
   return p;
 }
@@ -223,9 +224,9 @@ void *user_alloc_internal(ThreadState *thr, uptr pc, uptr sz, uptr align,
 void user_free(ThreadState *thr, uptr pc, void *p, bool signal) {
   ScopedGlobalProcessor sgp;
   if (ctx && ctx->initialized)
-    OnUserFree(thr, pc, (uptr)p, true);
+    OnUserFree(thr, pc, (uptr)p, !thr->in_symbolizer);
   allocator()->Deallocate(&thr->proc()->alloc_cache, p);
-  if (signal)
+  if (signal && !thr->in_symbolizer)
     SignalUnsafeCall(thr, pc);
 }
 
@@ -235,7 +236,7 @@ void *user_alloc(ThreadState *thr, uptr pc, uptr sz) {
 
 void *user_calloc(ThreadState *thr, uptr pc, uptr size, uptr n) {
   if (UNLIKELY(CheckForCallocOverflow(size, n))) {
-    if (AllocatorMayReturnNull())
+    if (AllocatorMayReturnNull() || thr->in_symbolizer)
       return SetErrnoOnNull(nullptr);
     GET_STACK_TRACE_FATAL(thr, pc);
     ReportCallocOverflow(n, size, &stack);
@@ -248,7 +249,7 @@ void *user_calloc(ThreadState *thr, uptr pc, uptr size, uptr n) {
 
 void *user_reallocarray(ThreadState *thr, uptr pc, void *p, uptr size, uptr n) {
   if (UNLIKELY(CheckForCallocOverflow(size, n))) {
-    if (AllocatorMayReturnNull())
+    if (AllocatorMayReturnNull() || thr->in_symbolizer)
       return SetErrnoOnNull(nullptr);
     GET_STACK_TRACE_FATAL(thr, pc);
     ReportReallocArrayOverflow(n, size, &stack);
@@ -276,8 +277,8 @@ void OnUserAlloc(ThreadState *thr, uptr pc, uptr p, uptr sz, bool write) {
 
 void OnUserFree(ThreadState *thr, uptr pc, uptr p, bool write) {
   CHECK_NE(p, (void*)0);
-  if (!thr->slot) {
-    // Very early/late in thread lifetime, or during fork.
+  if (!thr->slot || thr->in_symbolizer) {
+    // Very early/late in thread lifetime, or during fork/symbolization.
     UNUSED uptr sz = ctx->metamap.FreeBlock(thr->proc(), p, false);
     DPrintf("#%d: free(0x%zx, %zu) (no slot)\n", thr->tid, p, sz);
     return;
@@ -310,7 +311,7 @@ void *user_realloc(ThreadState *thr, uptr pc, void *p, uptr sz) {
 void *user_memalign(ThreadState *thr, uptr pc, uptr align, uptr sz) {
   if (UNLIKELY(!IsPowerOfTwo(align))) {
     errno = errno_EINVAL;
-    if (AllocatorMayReturnNull())
+    if (AllocatorMayReturnNull() || thr->in_symbolizer)
       return nullptr;
     GET_STACK_TRACE_FATAL(thr, pc);
     ReportInvalidAllocationAlignment(align, &stack);
@@ -321,7 +322,7 @@ void *user_memalign(ThreadState *thr, uptr pc, uptr align, uptr sz) {
 int user_posix_memalign(ThreadState *thr, uptr pc, void **memptr, uptr align,
                         uptr sz) {
   if (UNLIKELY(!CheckPosixMemalignAlignment(align))) {
-    if (AllocatorMayReturnNull())
+    if (AllocatorMayReturnNull() || thr->in_symbolizer)
       return errno_EINVAL;
     GET_STACK_TRACE_FATAL(thr, pc);
     ReportInvalidPosixMemalignAlignment(align, &stack);
@@ -338,7 +339,7 @@ int user_posix_memalign(ThreadState *thr, uptr pc, void **memptr, uptr align,
 void *user_aligned_alloc(ThreadState *thr, uptr pc, uptr align, uptr sz) {
   if (UNLIKELY(!CheckAlignedAllocAlignmentAndSize(align, sz))) {
     errno = errno_EINVAL;
-    if (AllocatorMayReturnNull())
+    if (AllocatorMayReturnNull() || thr->in_symbolizer)
       return nullptr;
     GET_STACK_TRACE_FATAL(thr, pc);
     ReportInvalidAlignedAllocAlignment(sz, align, &stack);
@@ -354,7 +355,7 @@ void *user_pvalloc(ThreadState *thr, uptr pc, uptr sz) {
   uptr PageSize = GetPageSizeCached();
   if (UNLIKELY(CheckForPvallocOverflow(sz, PageSize))) {
     errno = errno_ENOMEM;
-    if (AllocatorMayReturnNull())
+    if (AllocatorMayReturnNull() || thr->in_symbolizer)
       return nullptr;
     GET_STACK_TRACE_FATAL(thr, pc);
     ReportPvallocOverflow(sz, &stack);
